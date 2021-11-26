@@ -1,0 +1,137 @@
+---
+title: "Bumblebees"
+author: "Peter Menzies"
+date: "11/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(janitor)
+library(sf)
+library(tmap)
+library(snakecase)
+library(leaflet)
+library(tigris)
+```
+
+
+```{r}
+bumblebees <- read_csv("data/bumble_bee_occurrence.csv") %>% 
+  clean_names() %>% 
+  unite("date", year:day, sep = "-", remove = F) %>% 
+  filter(between(year, 2002, 2010)) %>% 
+  mutate(county = to_snake_case(county))
+```
+
+
+
+```{r}
+bumble_state <- bumblebees %>% 
+  group_by(state_province) %>% 
+  count()
+```
+
+```{r}
+bumble_county <- bumblebees %>% 
+  group_by(state_province, county) %>% 
+  count()
+```
+
+
+```{r}
+bumble_sf <- bumblebees %>% 
+  filter(!is.na(verbatim_longitude)) %>%
+  filter(!is.na(verbatim_latitude)) %>% 
+  st_as_sf(coords = c("verbatim_longitude", "verbatim_latitude"), crs = 4326)
+
+bbox <- st_bbox(bumble_sf)
+
+
+tm_shape(bumble_sf) +
+  tm_dots()
+```
+
+```{r}
+ca <- county_subdivisions("CA") %>% 
+  select(NAME, geometry)
+```
+
+
+```{r}
+bumble_sf_ca <- bumble_sf %>% 
+  filter(state_province == "California")
+  
+tm_shape(bumble_sf_ca) +
+  tm_dots() + 
+  tm_shape(ca) +
+  tm_polygons()
+```
+
+### Determine mean number of colonies per county between 2002 and 2012
+
+```{r}
+honeybee_county <- read.csv("data/Bee Colony Census Data by County.csv") %>% 
+  clean_names() %>% 
+  mutate(value = as.numeric(gsub(",", "", value))) %>% 
+  mutate(county = to_snake_case(county))
+
+colonies_by_county <- honeybee_county %>% 
+  filter(!is.na(value)) %>% 
+  group_by(year, county) %>% 
+  summarize(colonies = sum(value))
+
+surveys <- colonies_by_county %>% 
+  group_by(county) %>% 
+  count()
+
+honey_means <- colonies_by_county %>% 
+  group_by(county) %>% 
+  summarize(total_colonies = sum(colonies)) %>% 
+  add_column(surveys = surveys$n) %>% 
+  mutate(mean_colonies = total_colonies / surveys)
+```
+
+### Joining bumble and honey
+
+```{r}
+bees_joined <- bumble_county %>% 
+  left_join(honey_means, by = "county")
+```
+
+
+
+```{r}
+lm(n ~ total_colonies, bees_joined) %>% summary()
+```
+
+
+
+
+```{r}
+bumble_sf_years <- bumble_sf %>% 
+  group_by(year) %>% 
+  count() %>% 
+  filter(year > 1900)
+```
+
+
+## US Bombus dataset
+
+
+```{r}
+bombus <- read_tsv("data/us_bombus.csv") %>% 
+  clean_names()
+
+bombus %>% 
+  group_by(year) %>% 
+  summarize(n = sum(individual_count))
+
+bombus_ca <- bombus %>% 
+  filter(!is.na(decimal_latitude) & !is.na(decimal_longitude))
+
+```
+
+

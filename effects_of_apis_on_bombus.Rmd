@@ -1,0 +1,101 @@
+---
+title: "Potential impacts of managed honeybee colonies on Bombus occurrence in US counties"
+author: "Peter Menzies"
+date: "11/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Question and background
+
+## Data
+
+## Reading in and wrangling
+
+### Honeybees
+
+```{r}
+honeybees <- read.csv("data/Bee Colony Census Data by County.csv") %>% 
+  clean_names() %>% 
+  mutate(value = as.numeric(gsub(",", "", value))) %>% 
+  mutate(county = to_snake_case(county))
+
+colonies_by_county <- honeybees %>% 
+  filter(!is.na(value)) %>% 
+  group_by(year, county) %>% 
+  summarize(colonies = sum(value))
+
+surveys <- colonies_by_county %>% 
+  group_by(county) %>% 
+  count()
+
+honey_means <- colonies_by_county %>% 
+  group_by(county) %>% 
+  summarize(total_colonies = sum(colonies)) %>% 
+  add_column(surveys = surveys$n) %>% 
+  mutate(mean_colonies = total_colonies / surveys)
+```
+
+### Bumblebees
+
+#### Bumblebee dataset 1 — Data from: _Patterns of Widespread Decline in North American Bumble Bees_
+
+```{r}
+bumblebees <- read_csv("data/bumble_bee_occurrence.csv") %>% 
+  clean_names() %>% 
+  unite("date", year:day, sep = "-", remove = F) %>% 
+  filter(between(year, 2002, 2010)) %>% 
+  mutate(county = to_snake_case(county))
+```
+
+```{r}
+bumble_by_county <- bumblebees %>% 
+  group_by(state_province, county) %>% 
+  count()
+```
+
+#### Bumblebee dataset 2 — _USBombus: contemporary survey data of North American bumble bees (Hymenoptera, Apidae, Bombus) distributed in the United States_
+
+```{r}
+bombus <- read_tsv("data/us_bombus.csv") %>% 
+  clean_names() %>% 
+  mutate(county = to_snake_case(county))
+```
+
+Our `bombus` dataset doesn't include the county that each observation was taken in, but it _does_ provide a latitude and longitude—so, we'll have to use those to bootstrap a spatial dataframe, and perform a spatial join with US county data. 
+
+First we'll create our spatial dataframe.
+
+```{r}
+bombus_sf <- bombus %>% 
+  st_as_sf(coords = c("decimal_longitude", "decimal_latitude"), crs = "NAD83")
+```
+
+Then we'll create a dataframe containing the spatial bounds of US counties using the `tigris` package.
+
+```{r}
+counties <- counties() %>% 
+  select(NAME, geometry) %>% 
+  rename(county = NAME)
+```
+
+```{r}
+bombus_counties <- st_join(bombus_sf, counties, join = st_intersects) %>% 
+  as.data.frame() %>% 
+  select(species, state_province, county, individual_count)
+```
+
+
+
+## Chloropleths for funsies
+
+## Plotting and Regression
+
+## Conclusions and takeaways
+
+
+
+

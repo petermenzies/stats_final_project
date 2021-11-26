@@ -1,0 +1,18 @@
+---
+title: "Honeybees"
+author: "Peter Menzies"
+date: "11/24/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(janitor)
+```
+
+```{r}
+honeybees <- read_csv("data/bee_colony_by_state.csv")
+```
+

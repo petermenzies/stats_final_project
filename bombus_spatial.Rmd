@@ -1,0 +1,71 @@
+---
+title: "bombus"
+author: "Peter Menzies"
+date: "11/25/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+bombus <- read_tsv("data/us_bombus.csv") %>% 
+  clean_names()
+
+bombus_sf <- bombus %>% 
+  st_as_sf(coords = c("decimal_longitude", "decimal_latitude"), crs = "NAD83")
+
+tm_shape(bombus_sf) +
+  tm_dots()
+```
+
+
+```{r}
+counties <- counties() %>% 
+  select(NAME, geometry) %>% 
+  rename(county = NAME)
+```
+
+
+```{r}
+bombus_counties <- st_join(bombus_sf, counties, join = st_intersects) %>% 
+  as.data.frame() %>% 
+  select(species, state_province, county, individual_count)
+```
+
+
+```{r}
+
+bombus_counts <- bombus_counties %>%
+  group_by(state_province, county) %>% 
+  summarize(n2 = sum(individual_count))
+
+```
+```{r}
+all_joined <- bees_joined %>% 
+  full_join(bombus_counts, by = c("state_province" = "state_province", "county" = "county")) %>% 
+  mutate(bumble_counts = sum(c(n, n2), na.rm = T))
+```
+
+
+```{r}
+join_test <- all_joined %>% 
+  filter(!is.na(mean_colonies)) %>% 
+  mutate(
+    log_colonies = log(mean_colonies),
+    log_bumble = log(bumble_counts)
+  )
+```
+
+
+```{r}
+ggplot(join_test, aes(x = log_colonies, y = log_bumble)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+
+
+
+
