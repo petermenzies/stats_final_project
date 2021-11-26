@@ -7,6 +7,14 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(janitor)
+library(sf)
+library(tmap)
+library(snakecase)
+library(leaflet)
+library(tigris)
 ```
 
 ## Question and background
@@ -21,19 +29,20 @@ knitr::opts_chunk$set(echo = TRUE)
 honeybees <- read.csv("data/Bee Colony Census Data by County.csv") %>% 
   clean_names() %>% 
   mutate(value = as.numeric(gsub(",", "", value))) %>% 
-  mutate(county = to_snake_case(county))
+  mutate(county = to_snake_case(county)) %>% 
+  mutate(state = str_to_title(state))
 
 colonies_by_county <- honeybees %>% 
   filter(!is.na(value)) %>% 
-  group_by(year, county) %>% 
+  group_by(year, county, state) %>% 
   summarize(colonies = sum(value))
 
 surveys <- colonies_by_county %>% 
-  group_by(county) %>% 
+  group_by(county, state) %>% 
   count()
 
-honey_means <- colonies_by_county %>% 
-  group_by(county) %>% 
+colony_means <- colonies_by_county %>% 
+  group_by(county, state) %>% 
   summarize(total_colonies = sum(colonies)) %>% 
   add_column(surveys = surveys$n) %>% 
   mutate(mean_colonies = total_colonies / surveys)
@@ -61,8 +70,7 @@ bumble_by_county <- bumblebees %>%
 
 ```{r}
 bombus <- read_tsv("data/us_bombus.csv") %>% 
-  clean_names() %>% 
-  mutate(county = to_snake_case(county))
+  clean_names()
 ```
 
 Our `bombus` dataset doesn't include the county that each observation was taken in, but it _does_ provide a latitude and longitude—so, we'll have to use those to bootstrap a spatial dataframe, and perform a spatial join with US county data. 
@@ -78,19 +86,65 @@ Then we'll create a dataframe containing the spatial bounds of US counties using
 
 ```{r}
 counties <- counties() %>% 
-  select(NAME, geometry) %>% 
-  rename(county = NAME)
+  select(NAME, STATEFP, COUNTYFP, geometry) %>% 
+  rename(county = NAME, county_code = COUNTYFP) %>% 
+  mutate(county = to_snake_case(county))
 ```
 
 ```{r}
-bombus_counties <- st_join(bombus_sf, counties, join = st_intersects) %>% 
+bombus_counties <- st_join(bombus_sf, counties, join = st_intersects)
+```
+
+```{r}
+bombus_by_county <- bombus_counties %>%
+  as.data.frame %>% 
+  group_by(state_province, county) %>% 
+  summarize(n2 = sum(individual_count))
+```
+
+#### Joining dataframes
+
+```{r}
+bumble_joined <- bumble_by_county %>% 
+  full_join(bombus_by_county, by = c("state_province" = "state_province", "county" = "county")) %>%
+  mutate(bumble_counts = sum(c(n, n2), na.rm = TRUE))
+```
+
+```{r}
+all_joined <- bumble_joined %>% 
+  left_join(colony_means, by = c("state_province" = "state", "county" = "county")) %>% 
   as.data.frame() %>% 
-  select(species, state_province, county, individual_count)
+  filter(!is.na(mean_colonies))
 ```
 
 
-
 ## Chloropleths for funsies
+
+```{r}
+fips <- fips_codes %>% 
+  select(state_code, state_name) %>% 
+  rename(STATEFP = state_code) %>% 
+  distinct()
+
+state_county_geoms <- counties %>% 
+  left_join(fips, by = "STATEFP")
+
+# restoring geometries of counties
+all_joined_sf <- state_county_geoms %>% 
+  left_join(all_joined, by = c("state_name" = "state_province", "county" = "county")) %>% 
+  filter(!is.na(mean_colonies) & !is.na(bumble_counts))
+```
+
+```{r}
+tm_shape(all_joined_sf) +
+  tm_polygons(col = "bumble_counts")
+```
+
+```{r}
+tm_shape(all_joined_sf) +
+  tm_polygons(col = "mean_colonies")
+```
+
 
 ## Plotting and Regression
 
