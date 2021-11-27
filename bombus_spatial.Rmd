@@ -36,11 +36,9 @@ bombus_counties <- st_join(bombus_sf, counties, join = st_intersects) %>%
 
 
 ```{r}
-
-bombus_counts <- bombus_counties %>%
+bombus_by_county <- bombus_counties %>%
   group_by(state_province, county) %>% 
   summarize(n2 = sum(individual_count))
-
 ```
 ```{r}
 all_joined <- bees_joined %>% 

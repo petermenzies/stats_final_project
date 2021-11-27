@@ -15,6 +15,7 @@ library(tmap)
 library(snakecase)
 library(leaflet)
 library(tigris)
+library(DescTools)
 ```
 
 ## Question and background
@@ -137,18 +138,68 @@ all_joined_sf <- state_county_geoms %>%
 
 ```{r}
 tm_shape(all_joined_sf) +
-  tm_polygons(col = "bumble_counts")
+  tm_polygons(col = "bumble_counts",
+              palette = "YlGn",
+              style = "cont",
+              breaks = seq(0, 2000, 250))
 ```
 
 ```{r}
 tm_shape(all_joined_sf) +
-  tm_polygons(col = "mean_colonies")
+  tm_polygons(col = "mean_colonies", )
+```
+
+```{r}
+ggplot(all_joined, aes(x = log(bumble_counts))) +
+  geom_histogram()
+```
+```{r}
+ggplot(all_joined, aes(x = log(mean_colonies))) +
+  geom_histogram()
 ```
 
 
 ## Plotting and Regression
 
+```{r}
+bombus_on_apis <- ggplot(all_joined, aes(x = mean_colonies, y = bumble_counts)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+bombus_on_apis
+```
+```{r}
+bumble_99 <- quantile(all_joined$bumble_counts, 0.99)
+colony_99 <- quantile(all_joined$mean_colonies, 0.99)
+
+all_joined_winsorized <- all_joined %>% 
+  mutate(bumble_counts = Winsorize(bumble_counts, maxval = bumble_99),
+         mean_colonies = Winsorize(mean_colonies, maxval = colony_99))
+```
+
+```{r}
+bombus_apis_winsor <- ggplot(all_joined_winsorized, aes(x = mean_colonies, y = bumble_counts)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+
+bombus_apis_winsor
+```
+
+```{r}
+apis_bombus_regression <- lm(bumble_counts ~ mean_colonies, all_joined) %>% 
+  summary()
+apis_bombus_regression
+```
+```{r}
+apis_bombus_winsor_regression <- lm(bumble_counts ~ mean_colonies, all_joined_winsorized) %>% 
+  summary()
+apis_bombus_winsor_regression
+```
+
+
 ## Conclusions and takeaways
+
+
 
 
 
