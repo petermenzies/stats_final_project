@@ -87,7 +87,7 @@ Then we'll create a dataframe containing the spatial bounds of US counties using
 
 ```{r}
 counties <- counties() %>% 
-  select(NAME, STATEFP, COUNTYFP, geometry) %>% 
+  dplyr::select(NAME, STATEFP, COUNTYFP, geometry) %>% 
   rename(county = NAME, county_code = COUNTYFP) %>% 
   mutate(county = to_snake_case(county))
 ```
@@ -123,7 +123,7 @@ all_joined <- bumble_joined %>%
 
 ```{r}
 fips <- fips_codes %>% 
-  select(state_code, state_name) %>% 
+  dplyr::select(state_code, state_name) %>% 
   rename(STATEFP = state_code) %>% 
   distinct()
 

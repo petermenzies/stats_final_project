@@ -166,6 +166,8 @@ grid_sf <- new_bbox %>%
   st_make_grid(cellsize = c(0.4, 0.4), what = "centers") %>%
   st_as_sf() %>%
   cbind(., st_coordinates(.))
+
+plot(grid_sf)
 ```
 
 
@@ -179,7 +181,7 @@ grid_sp <- as(grid_sp, "SpatialPixels") # specifying what kind of grid
 
 ```{r}
 new_bbox <- st_bbox(c("xmin" = -126,
-                      "ymin" = 19,
+                      "ymin" = 20,
                       "xmax" = -65,
                       "ymax" = 50),
                     crs = 4269)
@@ -289,4 +291,24 @@ all_bombus_sf <- all_bombus %>%
   st_as_sf(coords = c("decimal_longitude", "decimal_latitude"),
            crs = 4269)
 ```
+
+
+```{r}
+krige_means <-  st_make_valid(krige_means)
+
+tm_shape(krige_means) +
+  tm_dots(col = "mean_pred_occurrence",
+          style = "cont",
+          palette = "plasma")
+```
+
+
+
+```{r}
+ggplot(krige_means, aes(x = mean_pred_occurrence)) +
+  geom_histogram()
+```
+
+
+
 
