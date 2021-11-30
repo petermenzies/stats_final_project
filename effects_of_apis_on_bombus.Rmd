@@ -196,6 +196,20 @@ apis_bombus_winsor_regression <- lm(bumble_counts ~ mean_colonies, all_joined_wi
 apis_bombus_winsor_regression
 ```
 
+```{r}
+# regression
+model <- lm(bumble_counts ~ mean_colonies, data = all_joined)
+
+# create predictions and residuals
+predictions <- all_joined %>%
+  modelr::add_predictions(model) %>%
+  mutate(residuals = bumble_counts-pred)
+
+ggplot(predictions, aes(x = mean_colonies, y = residuals)) +
+  geom_point(alpha = 0.5)
+
+```
+
 
 ## Conclusions and takeaways
 
