@@ -138,7 +138,7 @@ bombus_sf <- bombus_totals %>%
   st_as_sf(coords = c("decimal_longitude", "decimal_latitude"),
            crs = 4269)
 
-tm_shape(bombus_sf) +
+tm_shape(all_bombus_sf) +
   tm_dots(col = 'n',
           size = 0.5,
           palette = 'plasma',
@@ -147,13 +147,13 @@ tm_shape(bombus_sf) +
 
 
 ```{r}
-bombus_vgram <- variogram(n~1, as(bombus_sf, "Spatial"))
+bombus_vgram <- variogram(n~1, as(all_bombus_sf, "Spatial"))
 
 plot(bombus_vgram)
 ```
 
 ```{r}
-vgram_model_full <- automap::autofitVariogram(n~1, as(bombus_sf, "Spatial"))
+vgram_model_full <- automap::autofitVariogram(n ~ 1, as(all_bombus_sf, "Spatial"))
 
 vgram_model <- vgram_model_full$var_model
 
@@ -161,14 +161,11 @@ plot(vgram_model_full)
 ```
 
 ```{r}
-grid_sf <- bombus_sf %>% 
-  st_bbox() %>% 
+grid_sf <- new_bbox %>%  
   st_as_sfc() %>%
-  st_make_grid(cellsize = c(0.2, 0.2), what = "centers") %>%
+  st_make_grid(cellsize = c(0.4, 0.4), what = "centers") %>%
   st_as_sf() %>%
   cbind(., st_coordinates(.))
-
-plot(grid_sf)
 ```
 
 
@@ -181,43 +178,43 @@ grid_sp <- as(grid_sp, "SpatialPixels") # specifying what kind of grid
 
 
 ```{r}
+new_bbox <- st_bbox(c("xmin" = -126,
+                      "ymin" = 19,
+                      "xmax" = -65,
+                      "ymax" = 50),
+                    crs = 4269)
+
 st_bbox(bombus_sf)
 ```
+
+
 ```{r}
 krige <- krige(
-  n~1,                       # Z is our variable and "~1" means "depends on mean"
-  as(bombus_sf, "Spatial"), # input data in {sp} format
+  n ~ 1,                       # Z is our variable and "~1" means "depends on mean"
+  as(all_bombus_sf, "Spatial"), # input data in {sp} format
   grid_sp,                # locations to interpolate at
   model = vgram_model           # the variogram model fitted above
   )
 ```
 
 ```{r}
-plot_my_gstat_output <- function(raster_object, object_name){
-  
-  df <- rasterToPoints(raster_object) %>% as_tibble()
-  colnames(df) <- c("X", "Y", "Z")
-  
-  ggplot(df, aes(x = X, y = Y, fill = Z)) +
-    geom_raster() +
-    ggtitle(label = object_name) +
-    scale_fill_viridis(option = "B", limits = c(0, 100)) +
-    theme_void() +
-    theme(
-      plot.title = element_text(hjust = 0.5)
-    )
-}
+us_outline <- tigris::states() %>% 
+  dplyr::select(geometry) %>% 
+  st_combine() %>% 
+  st_make_valid() %>% 
+  st_as_sf(crs = 4269)
 ```
 
 
 ```{r}
-dim(krige)
+tm_shape(krige_raster) +
+  tm_raster(col = "var1.pred", palette = "plasma", style = "cont", title = "") +
+  tm_shape(us_outline) +
+  tm_borders(lwd = 1, col = "white") +
+  tm_layout(main.title = "Interpolated Bombus occurrence in the United States",
+            legend.position = c("left", "bottom"))
 ```
 
-
-```{r}
-plot_my_gstat_output(raster(krige), "test")
-```
 
 ```{r}
 krige_raster <- raster(krige)
@@ -254,5 +251,42 @@ ggplot(krige_joined, aes(x = mean_colonies, y = mean_pred_occurrence)) +
 ```
 
 
+```{r}
+lm(mean_pred_occurrence ~ mean_colonies, krige_joined) %>% summary()
 
+```
+
+
+```{r}
+# regression
+model_krige <- lm(mean_pred_occurrence ~ mean_colonies, data = krige_joined)
+
+# create predictions and residuals
+predictions_krige <- krige_joined %>%
+  modelr::add_predictions(model_krige) %>%
+  mutate(residuals = mean_pred_occurrence - pred)
+
+ggplot(predictions_krige, aes(x = mean_colonies, y = residuals)) +
+  geom_point(alpha = 0.5)
+
+```
+
+
+```{r}
+bumble_totals <- bumblebees %>% 
+  filter(state_province != "Alaska") %>% 
+  group_by(verbatim_latitude, verbatim_longitude) %>% 
+  count() %>% 
+
+all_bombus <- bombus_totals %>% 
+  full_join(bumble_totals, by = c("decimal_latitude" = "verbatim_latitude", 
+                                  "decimal_longitude" = "verbatim_longitude")) %>% 
+  mutate(n = sum(c(n.x, n.y), na.rm = TRUE)) %>% 
+  dplyr::select(decimal_latitude, decimal_longitude, n)
+
+all_bombus_sf <- all_bombus %>% 
+  filter(!is.na(decimal_latitude) & !is.na(decimal_longitude)) %>% 
+  st_as_sf(coords = c("decimal_longitude", "decimal_latitude"),
+           crs = 4269)
+```
 
