@@ -1,0 +1,238 @@
+---
+title: "Untitled"
+author: "Peter Menzies"
+date: "11/30/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(janitor)
+library(sf)
+library(tmap)
+library(snakecase)
+library(leaflet)
+library(tigris)
+library(gstat)
+library(sp)
+```
+
+## Question and background
+
+## Data
+
+## Reading in and wrangling
+
+### Honeybees
+
+```{r}
+honeybees <- read.csv("data/Bee Colony Census Data by County.csv") %>% 
+  clean_names() %>% 
+  mutate(value = as.numeric(gsub(",", "", value))) %>% 
+  mutate(county = to_snake_case(county)) %>% 
+  mutate(state = str_to_title(state))
+
+colonies_by_county <- honeybees %>% 
+  filter(!is.na(value)) %>% 
+  group_by(year, county, state) %>% 
+  summarize(colonies = sum(value))
+
+surveys <- colonies_by_county %>% 
+  group_by(county, state) %>% 
+  count()
+
+colony_means <- colonies_by_county %>% 
+  group_by(county, state) %>% 
+  summarize(total_colonies = sum(colonies)) %>% 
+  add_column(surveys = surveys$n) %>% 
+  mutate(mean_colonies = total_colonies / surveys)
+```
+
+### Bumblebees
+
+#### Bumblebee dataset 1 — Data from: _Patterns of Widespread Decline in North American Bumble Bees_
+
+
+```{r}
+bombus <- read_tsv("data/us_bombus.csv") %>% 
+  clean_names()
+
+bombus_totals <- bombus %>% 
+  filter(state_province != "Alaska") %>% 
+  group_by(decimal_latitude, decimal_longitude) %>% 
+  summarize(n = sum(individual_count))
+
+bombus_sf <- bombus_totals %>% 
+  filter(!is.na(decimal_latitude) & !is.na(decimal_longitude)) %>% 
+  st_as_sf(coords = c("decimal_longitude", "decimal_latitude"),
+           crs = 4269)
+```
+
+```{r}
+bumblebees <- read_csv("data/bumble_bee_occurrence.csv") %>% 
+  clean_names() %>% 
+  unite("date", year:day, sep = "-", remove = F) %>% 
+  filter(between(year, 2002, 2010)) %>% 
+  mutate(county = to_snake_case(county))
+```
+
+```{r}
+bumble_totals <- bumblebees %>% 
+  filter(state_province != "Alaska") %>% 
+  group_by(verbatim_latitude, verbatim_longitude) %>% 
+  count() 
+
+all_bombus <- bombus_totals %>% 
+  full_join(bumble_totals, by = c("decimal_latitude" = "verbatim_latitude", 
+                                  "decimal_longitude" = "verbatim_longitude")) %>%
+  mutate(n.x = replace_na(n.x, 0), n.y = replace_na(n.y, 0)) %>% 
+  mutate(n = n.x + n.y) %>% 
+  select(decimal_latitude, decimal_longitude, n)
+
+all_bombus_sf <- all_bombus %>% 
+  filter(!is.na(decimal_latitude) & !is.na(decimal_longitude)) %>% 
+  st_as_sf(coords = c("decimal_longitude", "decimal_latitude"),
+           crs = 4269)
+```
+
+```{r}
+tm_shape(all_bombus_sf) +
+  tm_dots(col = 'n',
+          size = 0.5,
+          palette = 'plasma',
+          alpha = 0.5)
+```
+
+
+```{r}
+bombus_vgram <- variogram(n ~ 1, as(bombus_sf, "Spatial"))
+
+plot(bombus_vgram)
+```
+
+```{r}
+vgram_model_full <- automap::autofitVariogram(n ~ 1, as(all_bombus_sf, "Spatial"))
+
+vgram_model <- vgram_model_full$var_model
+
+plot(vgram_model_full)
+```
+
+```{r}
+new_bbox <- st_bbox(c("xmin" = -126,
+                      "ymin" = 22,
+                      "xmax" = -65,
+                      "ymax" = 50),
+                    crs = 4269)
+```
+
+```{r}
+grid_sf <- new_bbox %>% 
+  st_as_sfc() %>%
+  st_make_grid(cellsize = c(0.4, 0.4), what = "centers") %>%
+  st_as_sf() %>%
+  cbind(., st_coordinates(.))
+```
+
+```{r}
+grid_sp <- as(grid_sf, "Spatial") # converting to {sp} format
+gridded(grid_sp) <- TRUE             # informing the object that it is a grid
+grid_sp <- as(grid_sp, "SpatialPixels") # specifying what kind of grid
+```
+
+
+```{r}
+krige <- krige(
+  n ~ 1,                       # Z is our variable and "~1" means "depends on mean"
+  as(bombus_sf, "Spatial"), # input data in {sp} format
+  grid_sp,                # locations to interpolate at
+  model = vgram_model           # the variogram model fitted above
+  )
+```
+
+```{r}
+krige_raster <- raster::raster(krige)
+
+krige_df <- raster::rasterToPoints(krige_raster) %>% as_tibble()
+
+krige_sf <- krige_df %>% 
+  st_as_sf(coords = c("x", "y"),
+           crs = 4269) %>% 
+  rename(pred_occurrence = var1.pred)
+```
+
+```{r}
+us_outline <- tigris::states() %>% 
+  dplyr::select(geometry) %>% 
+  st_combine() %>% 
+  st_make_valid() %>% 
+  st_as_sf(crs = 4269)
+```
+
+```{r}
+tm_shape(krige_raster) +
+  tm_raster(col = "var1.pred", palette = "plasma", style = "cont", title = "") +
+  tm_shape(us_outline) +
+  tm_borders(lwd = 1, col = "white") +
+  tm_layout(main.title = "Interpolated Bombus occurrence in the United States",
+            legend.position = c("left", "bottom"))
+```
+
+```{r}
+counties <- counties() %>% 
+  dplyr::select(NAME, STATEFP, COUNTYFP, geometry) %>% 
+  rename(county = NAME, county_code = COUNTYFP) %>% 
+  mutate(county = to_snake_case(county))
+```
+```{r}
+fips <- fips_codes %>% 
+  dplyr::select(state_code, state_name) %>% 
+  rename(STATEFP = state_code) %>% 
+  distinct()
+
+state_county_geoms <- counties %>% 
+  left_join(fips, by = "STATEFP")
+```
+
+
+```{r}
+krige_counties <- krige_sf %>% 
+  st_join(state_county_geoms, join = st_intersects) %>% 
+  filter(!is.na(county))
+  
+krige_means <- krige_counties %>% 
+  group_by(county, state_name) %>% 
+  summarize(mean_pred_occurrence = mean(pred_occurrence))
+```
+
+```{r}
+krige_joined <- krige_means %>% 
+  inner_join(colony_means, by = c("state_name" = "state", "county" = "county"))
+```
+
+```{r}
+ggplot(krige_joined, aes(x = mean_colonies, y = mean_pred_occurrence)) +
+  geom_point() +
+  geom_smooth(method = "lm")
+```
+
+
+```{r}
+lm(mean_pred_occurrence ~ mean_colonies, krige_joined) %>% summary()
+
+```
+
+```{r}
+krige_means <-st_make_valid(krige_means)
+
+tm_shape(krige_means) +
+  tm_dots(col = "mean_pred_occurrence",
+          size = 0.175,
+          style = "cont",
+          palette = "plasma",
+          title = "") +
+  tm_layout(main.title = "Interpolated Bombus occurrence in the United States")
+```
+
