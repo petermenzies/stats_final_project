@@ -9,7 +9,6 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 
 library(tidyverse)
-library(dplyr)
 library(janitor)
 library(sf)
 library(tmap)
@@ -161,6 +160,14 @@ plot(vgram_model_full)
 ```
 
 ```{r}
+new_bbox <- st_bbox(c("xmin" = -126,
+                      "ymin" = 20,
+                      "xmax" = -65,
+                      "ymax" = 50),
+                    crs = 4269)
+```
+
+```{r}
 grid_sf <- new_bbox %>%  
   st_as_sfc() %>%
   st_make_grid(cellsize = c(0.4, 0.4), what = "centers") %>%
@@ -176,17 +183,6 @@ plot(grid_sf)
 grid_sp <- as(grid_sf, "Spatial") # converting to {sp} format
 gridded(grid_sp) <- TRUE             # informing the object that it is a grid
 grid_sp <- as(grid_sp, "SpatialPixels") # specifying what kind of grid
-```
-
-
-```{r}
-new_bbox <- st_bbox(c("xmin" = -126,
-                      "ymin" = 20,
-                      "xmax" = -65,
-                      "ymax" = 50),
-                    crs = 4269)
-
-st_bbox(bombus_sf)
 ```
 
 
@@ -219,9 +215,9 @@ tm_shape(krige_raster) +
 
 
 ```{r}
-krige_raster <- raster(krige)
+krige_raster <- raster::raster(krige)
 
-krige_df <- rasterToPoints(krige_raster) %>% as_tibble()
+krige_df <- raster::rasterToPoints(krige_raster) %>% as_tibble()
 
 krige_sf <- krige_df %>% 
   st_as_sf(coords = c("x", "y"),
@@ -278,7 +274,7 @@ ggplot(predictions_krige, aes(x = mean_colonies, y = residuals)) +
 bumble_totals <- bumblebees %>% 
   filter(state_province != "Alaska") %>% 
   group_by(verbatim_latitude, verbatim_longitude) %>% 
-  count() %>% 
+  count() 
 
 all_bombus <- bombus_totals %>% 
   full_join(bumble_totals, by = c("decimal_latitude" = "verbatim_latitude", 
@@ -294,7 +290,7 @@ all_bombus_sf <- all_bombus %>%
 
 
 ```{r}
-krige_means <-  st_make_valid(krige_means)
+krige_means <-st_make_valid(krige_means)
 
 tm_shape(krige_means) +
   tm_dots(col = "mean_pred_occurrence",
@@ -310,5 +306,23 @@ ggplot(krige_means, aes(x = mean_pred_occurrence)) +
 ```
 
 
+```{r}
+county_krige <- state_county_geoms %>% 
+  st_join(krige_sf, join = st_intersects) %>% 
+  filter(!is.na(county))
+  
+krige_means <- krige_counties %>% 
+  group_by(county, state_name) %>% 
+  summarize(mean_pred_occurrence = mean(pred_occurrence))
+```
 
 
+```{r, eval=FALSE}
+# Taking a look at the interpolated raster
+tm_shape(krige_raster) +
+  tm_raster(col = "var1.pred", palette = "plasma", style = "cont", title = "") +
+  tm_shape(us_outline) +
+  tm_borders(lwd = 1, col = "white") +
+  tm_layout(main.title = "Interpolated Bombus occurrence in the United States",
+            legend.position = c("left", "bottom"))
+```
