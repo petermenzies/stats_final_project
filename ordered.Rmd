@@ -21,18 +21,28 @@ library(sp)
 
 ## Question and background
 
+Pollinator decline is among the world’s most pressing environmental issues. The many creatures that fill this niche are necessary for the reproduction of roughly 85% of flowering plant species, including about two-thirds of the world’s crop species. The services that pollinators provide in the US agricultural system is valued at $24 billion a year—not to mention the many ecosystems that hinge on their presence. Honeybees have become the poster child of this issue—and while the attention is well-deserved, the US is home to around 4000 native bee species, many of which are also facing population declines and are important pollinators. 49 of these are bumblebees, members of the genus Bombus, are among the most prolific and successful pollinators. In addition to their general efficacy as pollen carriers, bumblebees are the sole pollinators of certain plants they have coevolved with. Flowers of plants like blueberries, tomatoes, pumpkins, and many others require what’s known as buzz pollination, or sonication—this means they need a bee to vibrate at a particular frequency to release its pollen. Bombus species perform this form of pollination, making them invaluable to our native ecosystems and many important food crops.
+
+Interestingly, some studies have shown evidence that honeybees, which are nonnative, may be outcompeting native bees in some instances. It’s crucial that we understand everything that might be contributing to the decline of native bee species. The goal of this analysis is to investigate the possible relationship between the number of managed honeybee colonies and the instances of bumblebee occurrence within US counties. 
+
 ## Data
+
+The analysis will use two different datasets
 
 ## Reading in and wrangling
 
 ### Honeybees
 
 ```{r}
+# states not surveyed in USBombus
+missing_states <- c("Delaware", "Florida", "Hawaii", "Maryland", "Michigan", "New Hampshire", "New Jersey", "Rhode Island", "West Virginia")
+
 honeybees <- read.csv("data/Bee Colony Census Data by County.csv") %>% 
   clean_names() %>% 
   mutate(value = as.numeric(gsub(",", "", value))) %>% 
   mutate(county = to_snake_case(county)) %>% 
-  mutate(state = str_to_title(state))
+  mutate(state = str_to_title(state)) %>% 
+  filter(!state %in% missing_states)
 
 colonies_by_county <- honeybees %>% 
   filter(!is.na(value)) %>% 
@@ -47,12 +57,12 @@ colony_means <- colonies_by_county %>%
   group_by(county, state) %>% 
   summarize(total_colonies = sum(colonies)) %>% 
   add_column(surveys = surveys$n) %>% 
-  mutate(mean_colonies = total_colonies / surveys)
+  mutate(mean_colonies = total_colonies / surveys / 1000)
 ```
 
 ### Bumblebees
 
-#### Bumblebee dataset 1 — Data from: _Patterns of Widespread Decline in North American Bumble Bees_
+#### Data from — _USBombus: contemporary survey data of North American bumble bees (Hymenoptera, Apidae, Bombus) distributed in the United States_
 
 
 ```{r}
@@ -70,35 +80,10 @@ bombus_sf <- bombus_totals %>%
            crs = 4269)
 ```
 
-```{r}
-bumblebees <- read_csv("data/bumble_bee_occurrence.csv") %>% 
-  clean_names() %>% 
-  unite("date", year:day, sep = "-", remove = F) %>% 
-  filter(between(year, 2002, 2010)) %>% 
-  mutate(county = to_snake_case(county))
-```
+Next, let's get some perspective on how the Bombus occurrence data are dispersed
 
 ```{r}
-bumble_totals <- bumblebees %>% 
-  filter(state_province != "Alaska") %>% 
-  group_by(verbatim_latitude, verbatim_longitude) %>% 
-  count() 
-
-all_bombus <- bombus_totals %>% 
-  full_join(bumble_totals, by = c("decimal_latitude" = "verbatim_latitude", 
-                                  "decimal_longitude" = "verbatim_longitude")) %>%
-  mutate(n.x = replace_na(n.x, 0), n.y = replace_na(n.y, 0)) %>% 
-  mutate(n = n.x + n.y) %>% 
-  select(decimal_latitude, decimal_longitude, n)
-
-all_bombus_sf <- all_bombus %>% 
-  filter(!is.na(decimal_latitude) & !is.na(decimal_longitude)) %>% 
-  st_as_sf(coords = c("decimal_longitude", "decimal_latitude"),
-           crs = 4269)
-```
-
-```{r}
-tm_shape(all_bombus_sf) +
+tm_shape(bombus_sf) +
   tm_dots(col = 'n',
           size = 0.5,
           palette = 'plasma',
@@ -113,23 +98,17 @@ plot(bombus_vgram)
 ```
 
 ```{r}
-vgram_model_full <- automap::autofitVariogram(n ~ 1, as(all_bombus_sf, "Spatial"))
+vgram_model_full <- automap::autofitVariogram(n ~ 1, as(bombus_sf, "Spatial"))
 
 vgram_model <- vgram_model_full$var_model
 
 plot(vgram_model_full)
 ```
 
-```{r}
-new_bbox <- st_bbox(c("xmin" = -126,
-                      "ymin" = 22,
-                      "xmax" = -65,
-                      "ymax" = 50),
-                    crs = 4269)
-```
 
 ```{r}
-grid_sf <- new_bbox %>% 
+grid_sf <- bombus_sf %>% 
+  st_bbox %>% 
   st_as_sfc() %>%
   st_make_grid(cellsize = c(0.4, 0.4), what = "centers") %>%
   st_as_sf() %>%
@@ -172,6 +151,7 @@ us_outline <- tigris::states() %>%
 ```
 
 ```{r}
+# Taking a look at the interpolated raster
 tm_shape(krige_raster) +
   tm_raster(col = "var1.pred", palette = "plasma", style = "cont", title = "") +
   tm_shape(us_outline) +
@@ -185,8 +165,7 @@ counties <- counties() %>%
   dplyr::select(NAME, STATEFP, COUNTYFP, geometry) %>% 
   rename(county = NAME, county_code = COUNTYFP) %>% 
   mutate(county = to_snake_case(county))
-```
-```{r}
+
 fips <- fips_codes %>% 
   dplyr::select(state_code, state_name) %>% 
   rename(STATEFP = state_code) %>% 
@@ -208,14 +187,36 @@ krige_means <- krige_counties %>%
 ```
 
 ```{r}
-krige_joined <- krige_means %>% 
-  inner_join(colony_means, by = c("state_name" = "state", "county" = "county"))
+new_bbox <- st_bbox(c("xmin" = -126,
+                      "ymin" = 24,
+                      "xmax" = -65,
+                      "ymax" = 50),
+                    crs = 4269)
+```
+
+```{r}
+krige_joined <- colony_means %>% 
+  inner_join(krige_means, by = c("state" = "state_name", "county" = "county")) %>% 
+  st_as_sf(crs = 4269)
+
+tm_shape(krige_joined, bbox = new_bbox) +
+  tm_dots(col = "mean_pred_occurrence",
+          shape = 22,
+          border.lwd = 0,
+          size = 0.175,
+          style = "cont",
+          palette = "plasma",
+          title = "") +
+  tm_layout(main.title = "Interpolated Bombus occurrence in the United States") +
+  tm_shape(us_outline) +
+  tm_borders(lwd = 1.5)
 ```
 
 ```{r}
 ggplot(krige_joined, aes(x = mean_colonies, y = mean_pred_occurrence)) +
   geom_point() +
-  geom_smooth(method = "lm")
+  geom_smooth(method = "lm") +
+  theme_minimal()
 ```
 
 
@@ -224,15 +225,6 @@ lm(mean_pred_occurrence ~ mean_colonies, krige_joined) %>% summary()
 
 ```
 
-```{r}
-krige_means <-st_make_valid(krige_means)
 
-tm_shape(krige_means) +
-  tm_dots(col = "mean_pred_occurrence",
-          size = 0.175,
-          style = "cont",
-          palette = "plasma",
-          title = "") +
-  tm_layout(main.title = "Interpolated Bombus occurrence in the United States")
-```
+
 
